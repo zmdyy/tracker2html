@@ -1,6 +1,12 @@
 window.PhysicsEngine = (() => {
   function applyScale(px, metersPerPx) { return px * metersPerPx; }
+  
+  // Use FilterEngine if available, otherwise fallback to triangular smooth
   function smooth(values, strength) {
+    if (window.FilterEngine && window.FilterEngine.smooth) {
+      return window.FilterEngine.smooth(values, strength);
+    }
+    // Fallback: triangular smooth
     if (strength <= 0 || values.length < 3) return values.slice();
     const radius = strength;
     const out = [];
@@ -41,25 +47,40 @@ window.PhysicsEngine = (() => {
     const xPx = points.map(p=>p.x);
     const yPx = points.map(p=>p.y);
     const x0 = xPx[0], y0 = yPx[0];
-    let x = xPx.map(v => (v - (zeroAtStart ? x0 : 0)) * metersPerPx);
-    let y = yPx.map(v => ((invertY ? -(v-y0) : (v-y0)) * metersPerPx) + (zeroAtStart ? 0 : 0));
+    
+    // RAW positions (for audit)
+    const xRaw = xPx.map(v => (v - (zeroAtStart ? x0 : 0)) * metersPerPx);
+    const yRaw = yPx.map(v => ((invertY ? -(v-y0) : (v-y0)) * metersPerPx) + (zeroAtStart ? 0 : 0));
 
-    // Along-incline coordinate s; positive toward the chosen incline angle.
+    // FILTER POSITIONS FIRST
+    const x = smooth(xRaw, cfg.smooth||0);
+    const y = smooth(yRaw, cfg.smooth||0);
+
+    // Derive all quantities from FILTERED positions
     const s = x.map((vx,i) => vx*Math.cos(angle) + y[i]*Math.sin(angle));
-    const vx = deriveFirst(t, smooth(x,cfg.smooth||0));
-    const vy = deriveFirst(t, smooth(y,cfg.smooth||0));
+    const vx = deriveFirst(t, x);
+    const vy = deriveFirst(t, y);
     const speed = vx.map((v,i)=>Math.hypot(v,vy[i]));
-    const ax = deriveFirst(t, smooth(vx,cfg.smooth||0));
-    const ay = deriveFirst(t, smooth(vy,cfg.smooth||0));
+    const ax = deriveFirst(t, vx);
+    const ay = deriveFirst(t, vy);
     const accel = ax.map((v,i)=>Math.hypot(v,ay[i]));
-    const vs = deriveFirst(t, smooth(s,cfg.smooth||0));
-    const as = deriveFirst(t, smooth(vs,cfg.smooth||0));
+    const vs = deriveFirst(t, s);
+    const as = deriveFirst(t, vs);
 
     return points.map((p,i)=>{
       const Ek = 0.5 * mass * speed[i] * speed[i];
-      const Ep = mass * g * (y[i] + h0);
+      const Ep = mass * g * (y[i] + h0); // Use filtered y for Ep
       return {
-        ...p, t:t[i], x:x[i], y:y[i], s:s[i], vx:vx[i], vy:vy[i], v:speed[i], ax:ax[i], ay:ay[i], a:accel[i], vs:vs[i], as:as[i], Ek, Ep, Em:Ek+Ep
+        ...p, 
+        t:t[i], 
+        // Published (filtered) values
+        x:x[i], y:y[i], s:s[i], 
+        vx:vx[i], vy:vy[i], v:speed[i], 
+        ax:ax[i], ay:ay[i], a:accel[i], 
+        vs:vs[i], as:as[i], 
+        Ek, Ep, Em:Ek+Ep,
+        // Raw (unfiltered) values for audit
+        x_raw:xRaw[i], y_raw:yRaw[i]
       };
     });
   }

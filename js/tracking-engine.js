@@ -272,7 +272,9 @@ window.TrackingEngine = (() => {
 
     if(useColor){
       const roi={x:Math.max(0,lastPoint.x-120),y:Math.max(0,lastPoint.y-100),w:Math.min(frameCtx.canvas.width,lastPoint.x+120)-Math.max(0,lastPoint.x-120),h:Math.min(frameCtx.canvas.height,lastPoint.y+100)-Math.max(0,lastPoint.y-100)};
-      const comps=detectColorCandidates(firstImg,{minArea:80,roi,model:colorModel});
+      // Use step=1 for rotation modes (pendulum/circle) for better precision
+      const step = trackerMode==='pendulum' ? 1 : 2;
+      const comps=detectColorCandidates(firstImg,{minArea:80,roi,model:colorModel,step});
       let best=comps[0],bestDist=Infinity;
       for(const c of comps){
         const cc=candCenter(c);
@@ -311,7 +313,9 @@ window.TrackingEngine = (() => {
             const speed=Math.hypot(velocity.x,velocity.y);
             const searchRadius=Math.min(260,Math.max(70,baseRadius*3 + speed*2.4 + 24));
             const roi={x:Math.max(0,predicted.x-searchRadius),y:Math.max(0,predicted.y-searchRadius),w:Math.min(frameCtx.canvas.width,predicted.x+searchRadius)-Math.max(0,predicted.x-searchRadius),h:Math.min(frameCtx.canvas.height,predicted.y+searchRadius)-Math.max(0,predicted.y-searchRadius)};
-            const comps=detectColorCandidates(img,{minArea:60,roi,model:colorModel});
+            // Use step=1 for rotation modes (pendulum/circle) for better precision
+            const step = trackerMode==='pendulum' ? 1 : 2;
+            const comps=detectColorCandidates(img,{minArea:60,roi,model:colorModel,step});
             let best=null,bestScore=Infinity;
             for(const c of comps){
               const cc=candCenter(c);

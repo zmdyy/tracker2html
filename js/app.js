@@ -92,7 +92,8 @@
     const w=els.video.videoWidth,h=els.video.videoHeight;
     els.overlay.width=Math.max(1,Math.round(els.stage.clientWidth));
     els.overlay.height=Math.max(1,Math.round(els.stage.clientHeight));
-    els.frameCanvas.width=Math.min(720,w);
+    // Increased cap from 720 to 1280 for better rotation tracking precision
+    els.frameCanvas.width=Math.min(1280,w);
     els.frameCanvas.height=Math.max(1,Math.round(els.frameCanvas.width*h/w));
     updateHitArea();
     drawOverlay();
