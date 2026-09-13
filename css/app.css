@@ -51,7 +51,7 @@ button { cursor: pointer; }
 .stage-hud { position:absolute; left:14px; top:14px; display:flex; gap:8px; z-index:5; }
 .stage-hud span { background:rgba(11,17,26,.75); color:#fff; padding:6px 9px; border-radius:8px; font-size:11px; backdrop-filter:blur(5px); }
 .hidden { display:none !important; }
-.stage-action { position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:6; background:rgba(15,23,42,.88); color:#fff; padding:8px 13px; border-radius:999px; font-size:12px; font-weight:650; box-shadow:0 6px 18px rgba(0,0,0,.18); pointer-events:none; }
+.stage-action { position:absolute; left:50%; bottom:12px; top:auto; transform:translateX(-50%); z-index:6; background:rgba(15,23,42,.88); color:#fff; padding:8px 13px; border-radius:999px; font-size:12px; font-weight:650; box-shadow:0 6px 18px rgba(0,0,0,.18); pointer-events:none; max-width:min(92%,520px); text-align:center; }
 .stage-action.active { background:rgba(36,99,235,.94); }
 .transport { height:58px; padding:0 14px; display:flex; gap:7px; align-items:center; border-top:1px solid rgba(255,255,255,.05); background:#fff; }
 .transport-btn { width:36px;height:36px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--text); }
