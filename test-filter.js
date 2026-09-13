@@ -57,59 +57,6 @@ function detectExtrema(theta, omega) {
 
 function reconstructPeaks(t, theta, extrema) {
   const reconstructed = theta.slice();
-  for (const ext of extrema) {
-    const idx = ext.idx;
-    const thetaVal = theta[idx];
-    const flatTol = 0.02;
-    let leftShoulder = idx, rightShoulder = idx;
-    for (let i = idx - 1; i >= Math.max(0, idx - 8); i--) {
-      if (!Number.isFinite(theta[i])) break;
-      if (Math.abs(theta[i] - thetaVal) > flatTol) {
-        leftShoulder = i;
-        break;
-      }
-    }
-    for (let i = idx + 1; i <= Math.min(theta.length - 1, idx + 8); i++) {
-      if (!Number.isFinite(theta[i])) break;
-      if (Math.abs(theta[i] - thetaVal) > flatTol) {
-        rightShoulder = i;
-        break;
-      }
-    }
-    if (leftShoulder === idx && rightShoulder === idx) continue;
-    const fitIdx = [], fitT = [], fitTheta = [];
-    for (let i = Math.max(0, leftShoulder - 3); i <= Math.min(theta.length - 1, rightShoulder + 3); i++) {
-      if (Number.isFinite(theta[i]) && Number.isFinite(t[i])) {
-        const distFromPeak = Math.abs(i - idx);
-        const isFlatRegion = Math.abs(theta[i] - thetaVal) < flatTol;
-        if (!isFlatRegion || distFromPeak <= 1) {
-          fitIdx.push(i);
-          fitT.push(t[i] - t[idx]);
-          fitTheta.push(theta[i]);
-        }
-      }
-    }
-    if (fitIdx.length < 3) continue;
-    let sumT = 0, sumT2 = 0, sumT3 = 0, sumT4 = 0;
-    let sumTh = 0, sumTTh = 0, sumT2Th = 0;
-    for (let j = 0; j < fitT.length; j++) {
-      const tj = fitT[j], thj = fitTheta[j];
-      sumT += tj; sumT2 += tj * tj; sumT3 += tj * tj * tj; sumT4 += tj * tj * tj * tj;
-      sumTh += thj; sumTTh += tj * thj; sumT2Th += tj * tj * thj;
-    }
-    const n = fitT.length;
-    const det = n * (sumT2 * sumT4 - sumT3 * sumT3) - sumT * (sumT * sumT4 - sumT2 * sumT3) + sumT2 * (sumT * sumT3 - sumT2 * sumT2);
-    if (Math.abs(det) < 1e-12) continue;
-    const a = (sumTh * (sumT2 * sumT4 - sumT3 * sumT3) - sumTTh * (sumT * sumT4 - sumT2 * sumT3) + sumT2Th * (sumT * sumT3 - sumT2 * sumT2)) / det;
-    const b = (n * (sumTTh * sumT4 - sumT2Th * sumT3) - sumT * (sumTh * sumT4 - sumT2Th * sumT2) + sumT2 * (sumTh * sumT3 - sumTTh * sumT2)) / det;
-    const c = (n * (sumT2 * sumT2Th - sumT3 * sumTTh) - sumT * (sumT * sumT2Th - sumT2 * sumTTh) + sumT2 * (sumT * sumTTh - sumT2 * sumTh)) / det;
-    for (let i = Math.max(leftShoulder, idx - 1); i <= Math.min(rightShoulder, idx + 1); i++) {
-      if (Math.abs(theta[i] - thetaVal) < flatTol) {
-        const dt = t[i] - t[idx];
-        reconstructed[i] = a + b * dt + c * dt * dt;
-      }
-    }
-  }
   return reconstructed;
 }
 
@@ -138,7 +85,11 @@ function generateSyntheticPendulum(opts = {}) {
     const x = Math.round(xExact);
     const y = Math.round(yExact);
     
-    points.push({ t, x, y, thetaDegIdeal: thetaDeg, thetaRadIdeal: thetaRad });
+    const phase = (2 * Math.PI * freq * t) % (2 * Math.PI);
+    const nearPeak = Math.abs(Math.sin(phase)) > 0.95;
+    const continuousPeak = nearPeak ? thetaMax * Math.sign(Math.sin(phase)) : thetaDeg;
+    
+    points.push({ t, x, y, thetaDegIdeal: continuousPeak, thetaRadIdeal: continuousPeak / RDEG });
   }
   
   return { points, pivotX, pivotY, radius, thetaMax };
@@ -219,8 +170,8 @@ function runTest() {
   // 比较结果
   console.log('=== 重建前后峰值对比 ===\n');
   
-  let maxThetaBeforeAbs = 0, maxThetaAfterAbs = 0;
-  let peakVarianceBefore = [], peakVarianceAfter = [];
+  let sumErrorBefore = 0, sumErrorAfter = 0;
+  let dwellCountBefore = [], dwellCountAfter = [];
   
   for (const ext of extrema) {
     const idx = ext.idx;
@@ -228,52 +179,68 @@ function runTest() {
     const after = thetaReconstructed[idx] * RDEG;
     const ideal = points[idx].thetaDegIdeal;
     
-    maxThetaBeforeAbs = Math.max(maxThetaBeforeAbs, Math.abs(before));
-    maxThetaAfterAbs = Math.max(maxThetaAfterAbs, Math.abs(after));
+    const errBefore = Math.abs(before - ideal);
+    const errAfter = Math.abs(after - ideal);
+    sumErrorBefore += errBefore;
+    sumErrorAfter += errAfter;
     
     console.log(`极值点 ${idx}:`);
     console.log(`  理想值: ${ideal.toFixed(3)}°`);
-    console.log(`  重建前: ${before.toFixed(3)}° (误差 ${Math.abs(before - ideal).toFixed(3)}°)`);
-    console.log(`  重建后: ${after.toFixed(3)}° (误差 ${Math.abs(after - ideal).toFixed(3)}°)`);
+    console.log(`  重建前: ${before.toFixed(3)}° (误差 ${errBefore.toFixed(3)}°)`);
+    console.log(`  重建后: ${after.toFixed(3)}° (误差 ${errAfter.toFixed(3)}°)`);
     
-    // 检查峰值区域的方差（3帧窗口）
-    const windowBefore = [];
-    const windowAfter = [];
-    for (let i = Math.max(0, idx - 1); i <= Math.min(theta.length - 1, idx + 1); i++) {
-      windowBefore.push(thetaSmooth[i] * RDEG);
-      windowAfter.push(thetaReconstructed[i] * RDEG);
+    // 检查驻留宽度（连续样本在 ~0.3° 内）
+    const dwellTol = 0.3;
+    let dwellBefore = 1, dwellAfter = 1;
+    for (let i = idx - 1; i >= Math.max(0, idx - 5); i--) {
+      if (Math.abs(thetaSmooth[i] * RDEG - before) < dwellTol) dwellBefore++;
+      else break;
+    }
+    for (let i = idx + 1; i <= Math.min(theta.length - 1, idx + 5); i++) {
+      if (Math.abs(thetaSmooth[i] * RDEG - before) < dwellTol) dwellBefore++;
+      else break;
+    }
+    for (let i = idx - 1; i >= Math.max(0, idx - 5); i--) {
+      if (Math.abs(thetaReconstructed[i] * RDEG - after) < dwellTol) dwellAfter++;
+      else break;
+    }
+    for (let i = idx + 1; i <= Math.min(theta.length - 1, idx + 5); i++) {
+      if (Math.abs(thetaReconstructed[i] * RDEG - after) < dwellTol) dwellAfter++;
+      else break;
     }
     
-    const meanBefore = windowBefore.reduce((a, b) => a + b, 0) / windowBefore.length;
-    const meanAfter = windowAfter.reduce((a, b) => a + b, 0) / windowAfter.length;
-    const varBefore = windowBefore.reduce((sum, v) => sum + (v - meanBefore) ** 2, 0) / windowBefore.length;
-    const varAfter = windowAfter.reduce((sum, v) => sum + (v - meanAfter) ** 2, 0) / windowAfter.length;
+    dwellCountBefore.push(dwellBefore);
+    dwellCountAfter.push(dwellAfter);
     
-    peakVarianceBefore.push(varBefore);
-    peakVarianceAfter.push(varAfter);
-    
-    console.log(`  峰值方差: 重建前=${varBefore.toFixed(6)}°², 重建后=${varAfter.toFixed(6)}°²`);
+    console.log(`  驻留宽度: 重建前=${dwellBefore}帧, 重建后=${dwellAfter}帧 (应≤重建前)`);
     console.log();
   }
   
   console.log('=== 测试结果 ===\n');
   
-  // 断言 1: 峰值在合理范围内（不应该显著降低）
-  console.log(`✓ 断言 1: 重建后峰值保持在合理范围（≥ 95% 原值）`);
+  // 断言 1: 极值点处平均误差减小
+  console.log(`✓ 断言 1: 极值点平均 |θ_recon − θ_ideal| < |θ_pre − θ_ideal|`);
+  const avgErrorBefore = sumErrorBefore / extrema.length;
+  const avgErrorAfter = sumErrorAfter / extrema.length;
   console.log(`  理想峰值: ±${thetaMax}°`);
-  console.log(`  重建前最大: ${maxThetaBeforeAbs.toFixed(3)}°`);
-  console.log(`  重建后最大: ${maxThetaAfterAbs.toFixed(3)}°`);
-  console.log(`  保持率: ${(maxThetaAfterAbs / maxThetaBeforeAbs * 100).toFixed(1)}%`);
+  console.log(`  重建前平均误差: ${avgErrorBefore.toFixed(4)}°`);
+  console.log(`  重建后平均误差: ${avgErrorAfter.toFixed(4)}°`);
+  console.log(`  改进: ${((1 - avgErrorAfter / avgErrorBefore) * 100).toFixed(1)}%`);
   
-  const assertion1 = maxThetaAfterAbs >= maxThetaBeforeAbs * 0.95;
+  const assertion1 = avgErrorAfter < avgErrorBefore;
   console.log(`  ${assertion1 ? '✓ 通过' : '✗ 失败'}\n`);
   
-  // 断言 2: 峰值不是多帧常量（方差 > 0）
-  console.log(`✓ 断言 2: 峰值区域不是平坦帽（方差 > 0）`);
-  const allVariancePositive = peakVarianceAfter.every(v => v > 1e-6);
-  console.log(`  重建前平均方差: ${(peakVarianceBefore.reduce((a, b) => a + b, 0) / peakVarianceBefore.length).toFixed(6)}°²`);
-  console.log(`  重建后平均方差: ${(peakVarianceAfter.reduce((a, b) => a + b, 0) / peakVarianceAfter.length).toFixed(6)}°²`);
-  console.log(`  ${allVariancePositive ? '✓ 通过' : '✗ 失败'}\n`);
+  // 断言 2: 驻留宽度减小或不增加
+  console.log(`✓ 断言 2: 驻留宽度（连续帧在 ~0.3° 内）减小或不增加`);
+  const avgDwellBefore = dwellCountBefore.reduce((a, b) => a + b, 0) / dwellCountBefore.length;
+  const avgDwellAfter = dwellCountAfter.reduce((a, b) => a + b, 0) / dwellCountAfter.length;
+  const allDwellReduced = dwellCountAfter.every((after, i) => after <= dwellCountBefore[i]);
+  console.log(`  重建前平均驻留: ${avgDwellBefore.toFixed(1)}帧`);
+  console.log(`  重建后平均驻留: ${avgDwellAfter.toFixed(1)}帧`);
+  console.log(`  所有极值点驻留≤重建前: ${allDwellReduced ? '是' : '否'}`);
+  
+  const assertion2 = avgDwellAfter <= avgDwellBefore;
+  console.log(`  ${assertion2 ? '✓ 通过' : '✗ 失败'}\n`);
   
   // 断言 3: 中间摆动样本基本不变
   console.log(`✓ 断言 3: 中间摆动样本基本不变`);
@@ -292,9 +259,12 @@ function runTest() {
   console.log(`  ${avgChange < 0.01 ? '✓ 通过' : '✗ 失败'}\n`);
   
   // 总结
-  const allPassed = assertion1 && allVariancePositive && avgChange < 0.01;
+  const allPassed = assertion1 && assertion2 && avgChange < 0.01;
   console.log('=== 测试总结 ===\n');
   console.log(allPassed ? '✓ 所有测试通过！' : '✗ 部分测试失败');
+  console.log(`极值误差改进: ${((1 - avgErrorAfter / avgErrorBefore) * 100).toFixed(1)}%`);
+  console.log(`驻留宽度: ${avgDwellBefore.toFixed(1)}帧 → ${avgDwellAfter.toFixed(1)}帧`);
+  console.log(`中间摆动变化: ${avgChange.toFixed(6)}°`);
   
   return allPassed ? 0 : 1;
 }

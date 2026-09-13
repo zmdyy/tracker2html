@@ -54,59 +54,6 @@ window.RotationEngine = (() => {
 
   function reconstructPeaks(t, theta, extrema) {
     const reconstructed = theta.slice();
-    for (const ext of extrema) {
-      const idx = ext.idx;
-      const thetaVal = theta[idx];
-      const flatTol = 0.005;
-      let flatStart = idx, flatEnd = idx;
-      for (let i = idx - 1; i >= Math.max(0, idx - 6); i--) {
-        if (!Number.isFinite(theta[i])) break;
-        if (Math.abs(theta[i] - thetaVal) < flatTol) flatStart = i;
-        else break;
-      }
-      for (let i = idx + 1; i <= Math.min(theta.length - 1, idx + 6); i++) {
-        if (!Number.isFinite(theta[i])) break;
-        if (Math.abs(theta[i] - thetaVal) < flatTol) flatEnd = i;
-        else break;
-      }
-      const flatWidth = flatEnd - flatStart + 1;
-      if (flatWidth < 2) continue;
-      const fitIdx = [], fitT = [], fitTheta = [];
-      for (let i = Math.max(0, flatStart - 4); i < flatStart; i++) {
-        if (Number.isFinite(theta[i]) && Number.isFinite(t[i])) {
-          fitIdx.push(i);
-          fitT.push(t[i] - t[idx]);
-          fitTheta.push(theta[i]);
-        }
-      }
-      for (let i = flatEnd + 1; i <= Math.min(theta.length - 1, flatEnd + 4); i++) {
-        if (Number.isFinite(theta[i]) && Number.isFinite(t[i])) {
-          fitIdx.push(i);
-          fitT.push(t[i] - t[idx]);
-          fitTheta.push(theta[i]);
-        }
-      }
-      if (fitIdx.length < 4) continue;
-      let sumT = 0, sumT2 = 0, sumT3 = 0, sumT4 = 0;
-      let sumTh = 0, sumTTh = 0, sumT2Th = 0;
-      for (let j = 0; j < fitT.length; j++) {
-        const tj = fitT[j], thj = fitTheta[j];
-        sumT += tj; sumT2 += tj * tj; sumT3 += tj * tj * tj; sumT4 += tj * tj * tj * tj;
-        sumTh += thj; sumTTh += tj * thj; sumT2Th += tj * tj * thj;
-      }
-      const n = fitT.length;
-      const det = n * (sumT2 * sumT4 - sumT3 * sumT3) - sumT * (sumT * sumT4 - sumT2 * sumT3) + sumT2 * (sumT * sumT3 - sumT2 * sumT2);
-      if (Math.abs(det) < 1e-12) continue;
-      const a = (sumTh * (sumT2 * sumT4 - sumT3 * sumT3) - sumTTh * (sumT * sumT4 - sumT2 * sumT3) + sumT2Th * (sumT * sumT3 - sumT2 * sumT2)) / det;
-      const b = (n * (sumTTh * sumT4 - sumT2Th * sumT3) - sumT * (sumTh * sumT4 - sumT2Th * sumT2) + sumT2 * (sumTh * sumT3 - sumTTh * sumT2)) / det;
-      const c = (n * (sumT2 * sumT2Th - sumT3 * sumTTh) - sumT * (sumT * sumT2Th - sumT2 * sumTTh) + sumT2 * (sumT * sumTTh - sumT2 * sumTh)) / det;
-      const peakFromFit = a;
-      if (Math.abs(peakFromFit) < Math.abs(thetaVal) * 0.9) continue;
-      for (let i = flatStart; i <= flatEnd; i++) {
-        const dt = t[i] - t[idx];
-        reconstructed[i] = a + b * dt + c * dt * dt;
-      }
-    }
     return reconstructed;
   }
 
