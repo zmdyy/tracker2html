@@ -3,15 +3,25 @@ window.RotationEngine = (() => {
 
   function smoothArr(values, strength) {
     if (strength <= 0 || values.length < 3) return values.slice();
-    const radius = strength;
+    const radius = Math.min(strength, 2);
     const out = [];
+    const sgCoeffs = {
+      1: [-3, 12, 17, 12, -3],
+      2: [-21, 14, 39, 54, 59, 54, 39, 14, -21]
+    };
+    const coeffs = sgCoeffs[radius] || sgCoeffs[2];
+    const halfWin = Math.floor(coeffs.length / 2);
+    const norm = coeffs.reduce((a, b) => a + b, 0);
     for (let i = 0; i < values.length; i++) {
-      let sum = 0, wsum = 0;
-      for (let j = Math.max(0, i - radius); j <= Math.min(values.length - 1, i + radius); j++) {
-        const w = radius + 1 - Math.abs(i - j);
-        sum += values[j] * w; wsum += w;
+      if (i < halfWin || i >= values.length - halfWin) {
+        out.push(values[i]);
+      } else {
+        let sum = 0;
+        for (let j = 0; j < coeffs.length; j++) {
+          sum += values[i - halfWin + j] * coeffs[j];
+        }
+        out.push(sum / norm);
       }
-      out.push(sum / wsum);
     }
     return out;
   }
@@ -26,6 +36,78 @@ window.RotationEngine = (() => {
       v[q.length - 1] = (q[q.length - 1] - q[q.length - 2]) / Math.max(1e-9, t[q.length - 1] - t[q.length - 2]);
     }
     return v;
+  }
+
+  function detectExtrema(theta, omega) {
+    const extrema = [];
+    for (let i = 1; i < theta.length - 1; i++) {
+      if (!Number.isFinite(theta[i]) || !Number.isFinite(omega[i])) continue;
+      const isMax = theta[i] > theta[i - 1] && theta[i] > theta[i + 1];
+      const isMin = theta[i] < theta[i - 1] && theta[i] < theta[i + 1];
+      const omegaCross = i > 0 && i < omega.length - 1 && Number.isFinite(omega[i - 1]) && Number.isFinite(omega[i + 1]) && Math.sign(omega[i - 1]) !== Math.sign(omega[i + 1]);
+      if (isMax || isMin || omegaCross) {
+        extrema.push({ idx: i, type: isMax ? 'max' : isMin ? 'min' : 'turn' });
+      }
+    }
+    return extrema;
+  }
+
+  function reconstructPeaks(t, theta, extrema) {
+    const reconstructed = theta.slice();
+    for (const ext of extrema) {
+      const idx = ext.idx;
+      const thetaVal = theta[idx];
+      const flatTol = 0.005;
+      let flatStart = idx, flatEnd = idx;
+      for (let i = idx - 1; i >= Math.max(0, idx - 6); i--) {
+        if (!Number.isFinite(theta[i])) break;
+        if (Math.abs(theta[i] - thetaVal) < flatTol) flatStart = i;
+        else break;
+      }
+      for (let i = idx + 1; i <= Math.min(theta.length - 1, idx + 6); i++) {
+        if (!Number.isFinite(theta[i])) break;
+        if (Math.abs(theta[i] - thetaVal) < flatTol) flatEnd = i;
+        else break;
+      }
+      const flatWidth = flatEnd - flatStart + 1;
+      if (flatWidth < 2) continue;
+      const fitIdx = [], fitT = [], fitTheta = [];
+      for (let i = Math.max(0, flatStart - 4); i < flatStart; i++) {
+        if (Number.isFinite(theta[i]) && Number.isFinite(t[i])) {
+          fitIdx.push(i);
+          fitT.push(t[i] - t[idx]);
+          fitTheta.push(theta[i]);
+        }
+      }
+      for (let i = flatEnd + 1; i <= Math.min(theta.length - 1, flatEnd + 4); i++) {
+        if (Number.isFinite(theta[i]) && Number.isFinite(t[i])) {
+          fitIdx.push(i);
+          fitT.push(t[i] - t[idx]);
+          fitTheta.push(theta[i]);
+        }
+      }
+      if (fitIdx.length < 4) continue;
+      let sumT = 0, sumT2 = 0, sumT3 = 0, sumT4 = 0;
+      let sumTh = 0, sumTTh = 0, sumT2Th = 0;
+      for (let j = 0; j < fitT.length; j++) {
+        const tj = fitT[j], thj = fitTheta[j];
+        sumT += tj; sumT2 += tj * tj; sumT3 += tj * tj * tj; sumT4 += tj * tj * tj * tj;
+        sumTh += thj; sumTTh += tj * thj; sumT2Th += tj * tj * thj;
+      }
+      const n = fitT.length;
+      const det = n * (sumT2 * sumT4 - sumT3 * sumT3) - sumT * (sumT * sumT4 - sumT2 * sumT3) + sumT2 * (sumT * sumT3 - sumT2 * sumT2);
+      if (Math.abs(det) < 1e-12) continue;
+      const a = (sumTh * (sumT2 * sumT4 - sumT3 * sumT3) - sumTTh * (sumT * sumT4 - sumT2 * sumT3) + sumT2Th * (sumT * sumT3 - sumT2 * sumT2)) / det;
+      const b = (n * (sumTTh * sumT4 - sumT2Th * sumT3) - sumT * (sumTh * sumT4 - sumT2Th * sumT2) + sumT2 * (sumTh * sumT3 - sumTTh * sumT2)) / det;
+      const c = (n * (sumT2 * sumT2Th - sumT3 * sumTTh) - sumT * (sumT * sumT2Th - sumT2 * sumTTh) + sumT2 * (sumT * sumTTh - sumT2 * sumTh)) / det;
+      const peakFromFit = a;
+      if (Math.abs(peakFromFit) < Math.abs(thetaVal) * 0.9) continue;
+      for (let i = flatStart; i <= flatEnd; i++) {
+        const dt = t[i] - t[idx];
+        reconstructed[i] = a + b * dt + c * dt * dt;
+      }
+    }
+    return reconstructed;
   }
 
   function compute(points, pivot, cfg = {}) {
@@ -80,7 +162,11 @@ window.RotationEngine = (() => {
     const tv = valid.map(i => tFull[i]);
     const thetaV = valid.map(i => theta[i]);
     const thSm = smoothArr(thetaV, smooth);
-    const omegaV = deriv(tv, thSm);
+    const thetaRaw = theta.slice();
+    const omegaVPrelim = deriv(tv, thSm);
+    const extrema = detectExtrema(thSm, omegaVPrelim);
+    const thReconstructed = reconstructPeaks(tv, thSm, extrema);
+    const omegaV = deriv(tv, thReconstructed);
 
     const rArr = rPx.map(v => v * mpp);
     const rSm = smoothArr(valid.map(i => rArr[i]), smooth);
@@ -93,7 +179,11 @@ window.RotationEngine = (() => {
       vrFull[valid[j]] = vrV[j];
     }
     const thSmoothFull = new Array(n).fill(NaN);
-    for (let j = 0; j < valid.length; j++) thSmoothFull[valid[j]] = thSm[j];
+    const thReconstructedFull = new Array(n).fill(NaN);
+    for (let j = 0; j < valid.length; j++) {
+      thSmoothFull[valid[j]] = thSm[j];
+      thReconstructedFull[valid[j]] = thReconstructed[j];
+    }
 
     const period = detectPeriod(valid, tv, thetaV, omegaV, scene);
     const omMean = (() => {
@@ -114,12 +204,15 @@ window.RotationEngine = (() => {
     for (let i = 0; i < n; i++) {
       const p = points[i];
       const good = Number.isFinite(theta[i]) && rPx[i] >= 8;
+      const thetaFinal = Number.isFinite(thReconstructedFull[i]) ? thReconstructedFull[i] : theta[i];
       rows[i] = {
         frame: p && p.frame,
         t: tFull[i],
         r: Number.isFinite(rArr[i]) ? rArr[i] : NaN,
-        thetaRad: theta[i],
-        thetaDeg: Number.isFinite(theta[i]) ? theta[i] * RDEG : NaN,
+        thetaRad: thetaFinal,
+        thetaDeg: Number.isFinite(thetaFinal) ? thetaFinal * RDEG : NaN,
+        thetaRad_raw: thetaRaw[i],
+        thetaDeg_raw: Number.isFinite(thetaRaw[i]) ? thetaRaw[i] * RDEG : NaN,
         thetaBaseRad: base[i],
         thetaSmooth: thSmoothFull[i],
         omega: omegaFull[i],

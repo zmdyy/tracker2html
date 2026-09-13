@@ -98,6 +98,28 @@ window.TrackingEngine = (() => {
   // 在局部区域寻找与目标颜色相符的连续区域。与单纯颜色质心相比，连通域
   // 更不容易被背景上的零散同色像素拉偏；跟踪锚点使用“按匹配强度加权的质心”，
   // 在目标被部分遮挡或边缘破碎时比外接框中心更稳定。
+  function refineColorCentroidSubpixel(img, roi, model, centerMode='weighted'){
+    const {width:w,height:h,data}=img;
+    const x0=Math.max(0,Math.floor(roi.x));
+    const y0=Math.max(0,Math.floor(roi.y));
+    const x1=Math.min(w-1,Math.floor(roi.x+roi.w-1));
+    const y1=Math.min(h-1,Math.floor(roi.y+roi.h-1));
+    let sumW=0,sumWX=0,sumWY=0;
+    for(let y=y0;y<=y1;y++){
+      for(let x=x0;x<=x1;x++){
+        const i=(y*w+x)*4;
+        const R=data[i],G=data[i+1],B=data[i+2];
+        const hsv=rgbToHsv(R,G,B);
+        if(model && colorMatch(R,G,B,hsv,model)){
+          const wt=model.colorful?Math.max(0.2,hsv.s):1;
+          sumW+=wt; sumWX+=x*wt; sumWY+=y*wt;
+        }
+      }
+    }
+    if(sumW<1e-6)return null;
+    return {x:sumWX/sumW, y:sumWY/sumW};
+  }
+
   function detectColorCandidates(img,{minArea=100, roi=null, model=null, step=2}={}){
     const {width:w,height:h,data}=img;
     const x0=Math.max(0,Math.floor(roi?.x||0));
@@ -309,9 +331,11 @@ window.TrackingEngine = (() => {
 
           if(useColor){
             const speed=Math.hypot(velocity.x,velocity.y);
-            const searchRadius=Math.min(260,Math.max(70,baseRadius*3 + speed*2.4 + 24));
+            const isLowSpeed=speed<Math.max(3,baseRadius*0.25);
+            const searchRadius=Math.min(260,Math.max(isLowSpeed?50:70,baseRadius*3 + speed*2.4 + 24));
+            const detectStep=isLowSpeed?1:2;
             const roi={x:Math.max(0,predicted.x-searchRadius),y:Math.max(0,predicted.y-searchRadius),w:Math.min(frameCtx.canvas.width,predicted.x+searchRadius)-Math.max(0,predicted.x-searchRadius),h:Math.min(frameCtx.canvas.height,predicted.y+searchRadius)-Math.max(0,predicted.y-searchRadius)};
-            const comps=detectColorCandidates(img,{minArea:60,roi,model:colorModel});
+            const comps=detectColorCandidates(img,{minArea:60,roi,model:colorModel,step:detectStep});
             let best=null,bestScore=Infinity;
             for(const c of comps){
               const cc=candCenter(c);
@@ -332,7 +356,12 @@ window.TrackingEngine = (() => {
               }
             }
             if(best){
-              const cc=candCenter(best);
+              let cc=candCenter(best);
+              if(isLowSpeed && detectStep===1){
+                const refineRoi={x:Math.max(0,Math.floor(cc.x-baseRadius*0.8)),y:Math.max(0,Math.floor(cc.y-baseRadius*0.8)),w:Math.floor(baseRadius*1.6),h:Math.floor(baseRadius*1.6)};
+                const refined=refineColorCentroidSubpixel(img,refineRoi,colorModel,centerMode);
+                if(refined)cc=refined;
+              }
               candidate={x:cc.x+colorAnchorOffset.x,y:cc.y+colorAnchorOffset.y};
               const jump=Math.hypot(candidate.x-lastPoint.x,candidate.y-lastPoint.y);
               const maxJump=Math.max(70,baseRadius*3 + speed*2.8 + 30);
@@ -346,7 +375,8 @@ window.TrackingEngine = (() => {
 
           if(!candidate){
             const speed=Math.hypot(velocity.x,velocity.y);
-            const searchRadius=Math.min(220,Math.max(55,baseRadius*2.4+speed*2.1+20));
+            const isLowSpeed=speed<Math.max(3,baseRadius*0.25);
+            const searchRadius=isLowSpeed?Math.min(18,baseRadius*1.2):Math.min(220,Math.max(55,baseRadius*2.4+speed*2.1+20));
             const best=sadPatch(img.data,img.width,img.height,template,predicted.x,predicted.y,searchRadius);
             // 按实际参与比较的像素数计算误差上限，使置信度可比、可解释。
             const samples=Math.ceil(template.width/2)*Math.ceil(template.height/2);
