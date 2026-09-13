@@ -52,17 +52,33 @@ window.PhysicsEngine = (() => {
     const xRaw = xPx.map(v => (v - (zeroAtStart ? x0 : 0)) * metersPerPx);
     const yRaw = yPx.map(v => ((invertY ? -(v-y0) : (v-y0)) * metersPerPx) + (zeroAtStart ? 0 : 0));
 
-    // FILTER POSITIONS FIRST
-    const x = smooth(xRaw, cfg.smooth||0);
-    const y = smooth(yRaw, cfg.smooth||0);
+    // Use SG filter to get smoothed positions AND derivatives from same polynomial fit
+    const radius = cfg.smooth || 0;
+    let x, y, vx, vy, ax, ay;
+    
+    if (radius > 0 && window.FilterEngine && window.FilterEngine.sgFilterWithDerivatives) {
+      // SG method: extract position, velocity, acceleration from same fit
+      const xResult = window.FilterEngine.sgFilterWithDerivatives(t, xRaw, radius);
+      const yResult = window.FilterEngine.sgFilterWithDerivatives(t, yRaw, radius);
+      x = xResult.x;
+      y = yResult.x;
+      vx = xResult.v;
+      vy = yResult.v;
+      ax = xResult.a;
+      ay = yResult.a;
+    } else {
+      // Fallback: smooth then finite differences (current production baseline)
+      x = smooth(xRaw, radius);
+      y = smooth(yRaw, radius);
+      vx = deriveFirst(t, x);
+      vy = deriveFirst(t, y);
+      ax = deriveFirst(t, vx);
+      ay = deriveFirst(t, vy);
+    }
 
-    // Derive all quantities from FILTERED positions
-    const s = x.map((vx,i) => vx*Math.cos(angle) + y[i]*Math.sin(angle));
-    const vx = deriveFirst(t, x);
-    const vy = deriveFirst(t, y);
+    // Derive all quantities from filtered positions
+    const s = x.map((xi,i) => xi*Math.cos(angle) + y[i]*Math.sin(angle));
     const speed = vx.map((v,i)=>Math.hypot(v,vy[i]));
-    const ax = deriveFirst(t, vx);
-    const ay = deriveFirst(t, vy);
     const accel = ax.map((v,i)=>Math.hypot(v,ay[i]));
     const vs = deriveFirst(t, s);
     const as = deriveFirst(t, vs);
