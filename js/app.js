@@ -53,9 +53,16 @@
     }
   }
   function showStageAction(text, active=true){
+    clearTimeout(state.stageActionTimer);
     els.stageAction.textContent=text;
     els.stageAction.classList.toggle('hidden',!text);
     els.stageAction.classList.toggle('active',!!active);
+    if(text && !active){
+      state.stageActionTimer=setTimeout(()=>{
+        els.stageAction.classList.add('hidden');
+        els.stageAction.classList.remove('active');
+      },1600);
+    }
   }
   function clearInteraction(){
     state.scalePicking=false; state.inclinePicking=false; state.inclineStart=null;
@@ -123,7 +130,7 @@
     ctx.clearRect(0,0,els.overlay.width,els.overlay.height);
     if(!els.video.videoWidth)return;
 
-    if(state.detections.length){
+    if(state.detections.length && !state.target){
       state.detections.forEach(d=>{
         const [fx,fy,fw,fh]=d.bbox;
         const a=sourceToOverlay(frameToSource({x:fx,y:fy}));
@@ -151,6 +158,15 @@
     const target=state.currentTrackedPoint || state.target;
     if (target) {
       const p=sourceToOverlay(target); const r=Math.max(10,els.overlay.width/90);
+      const boxW=Number(target.w)||Number(state.target&&state.target.w);
+      const boxH=Number(target.h)||Number(state.target&&state.target.h);
+      if(boxW>0 && boxH>0){
+        const a=sourceToOverlay({x:target.x-boxW/2,y:target.y-boxH/2});
+        const b=sourceToOverlay({x:target.x+boxW/2,y:target.y+boxH/2});
+        ctx.strokeStyle='rgba(46,213,115,.95)';
+        ctx.lineWidth=Math.max(2,els.overlay.width/960);
+        ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);
+      }
       ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.strokeStyle='#ffd166';ctx.lineWidth=3;ctx.stroke();
       ctx.beginPath();ctx.moveTo(p.x-r*1.8,p.y);ctx.lineTo(p.x+r*1.8,p.y);ctx.moveTo(p.x,p.y-r*1.8);ctx.lineTo(p.x,p.y+r*1.8);ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
       const labelText=target.source==='ai'?`AI：${target.label||'目标'}`:target.source==='vision'?`视觉：${target.label||'小车'}`:'目标中心';
@@ -522,7 +538,7 @@
           const frameNo=Number.isFinite(p.frame)?p.frame:(Number.isFinite(p.t)?Math.round(p.t*(state.fps||30)):sampleIndex);
           if((frameNo-startFrame) % sampleEvery!==0)return;
           sampleIndex++;
-          const q={...frameToSource(p),t:Number.isFinite(p.t)?p.t:frameNo/(state.fps||30),frame:frameNo,confidence:p.confidence};
+          const q={...frameToSource(p),t:Number.isFinite(p.t)?p.t:frameNo/(state.fps||30),frame:frameNo,confidence:p.confidence,w:state.target&&state.target.w,h:state.target&&state.target.h,source:state.target&&state.target.source,label:state.target&&state.target.label};
           state.pointsPx.push(q); state.currentTrackedPoint=q; state.currentConfidence=p.confidence;
           els.pointState.textContent=`第 ${frameNo+1} 帧 · 点：${q.x.toFixed(0)}, ${q.y.toFixed(0)}`;
           els.selectionStatus.textContent=`正在跟踪目标：第 ${frameNo+1} 帧，时间 ${q.t.toFixed(3)} s；${p.confidence>=0.6?'跟踪稳定':'置信度偏低'}`;
@@ -545,7 +561,8 @@
     state.data=PhysicsEngine.analyze(state.pointsPx,cfg);
     state.rotation=null;
     if(state.rotationMode && state.pivotPx && state.pointsPx.length===state.data.length){
-      const rot=RotationEngine.compute(state.pointsPx,state.pivotPx,{metersPerPx:state.metersPerPx,fps:state.fps||30,smooth:cfg.smooth,scene:els.rotationScene?els.rotationScene.value:'circle'});
+      const scene=els.rotationScene?els.rotationScene.value:'circle';
+      const rot=RotationEngine.compute(state.pointsPx,state.pivotPx,{metersPerPx:state.metersPerPx,fps:state.fps||30,smooth:cfg.smooth,scene,gravity:cfg.gravity,mass:cfg.mass});
       state.rotation=rot;
       state.data=state.data.map(function(d,i){
         const row={...d,...rot.rows[i]};
@@ -555,6 +572,10 @@
         }
         return row;
       });
+      if(scene==='pendulum' && RotationEngine.applyPendulumConstraints){
+        const c=RotationEngine.applyPendulumConstraints(state.data,cfg);
+        if(c && Number.isFinite(c.L)) state.rotation.L=c.L;
+      }
     }
     updateMetrics();renderTable();updateAnalysis();drawOverlay();setHud();refreshTrajectory();refreshMiniCharts();if(state.tab==='charts')refreshChart();
   }

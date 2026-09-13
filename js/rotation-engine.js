@@ -225,5 +225,41 @@ window.RotationEngine = (() => {
     return { value, method: 'revolution', count: periods.length, direction: dir };
   }
 
-  return { compute };
+  function medianFinite(arr) {
+    const a = arr.filter(Number.isFinite).slice().sort((x, y) => x - y);
+    if (!a.length) return NaN;
+    const m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : 0.5 * (a[m - 1] + a[m]);
+  }
+
+  // Pendulum a/Em from measured theta, omega and median L, not from x,y second differences.
+  function applyPendulumConstraints(data, cfg = {}) {
+    const g = Math.max(0, Number(cfg.gravity) || 9.8);
+    const mass = Math.max(0, Number(cfg.mass) || 0);
+    const L = medianFinite(data.map(d => d.r));
+    if (!Number.isFinite(L) || L < 1e-9) return { L: NaN };
+    for (let i = 0; i < data.length; i++) {
+      const d = data[i];
+      if (!Object.prototype.hasOwnProperty.call(d, "a_raw")) d.a_raw = d.a;
+      if (!Object.prototype.hasOwnProperty.call(d, "v_raw")) d.v_raw = d.v;
+      if (!Object.prototype.hasOwnProperty.call(d, "Ek_raw")) d.Ek_raw = d.Ek;
+      if (!Object.prototype.hasOwnProperty.call(d, "Ep_raw")) d.Ep_raw = d.Ep;
+      if (!Object.prototype.hasOwnProperty.call(d, "Em_raw")) d.Em_raw = d.Em;
+      const th = d.thetaRad;
+      const om = d.omega;
+      if (!Number.isFinite(th) || !Number.isFinite(om)) continue;
+      const at = -g * Math.sin(th);
+      d.at = at;
+      d.an = om * om * L;
+      d.a = at;
+      d.vt = L * om;
+      d.v = Math.abs(d.vt);
+      d.Ek = 0.5 * mass * d.vt * d.vt;
+      d.Ep = mass * g * L * (1 - Math.cos(th));
+      d.Em = d.Ek + d.Ep;
+    }
+    return { L };
+  }
+
+  return { compute, applyPendulumConstraints };
 })();
