@@ -1,7 +1,12 @@
 window.RotationEngine = (() => {
   const RDEG = 180 / Math.PI;
 
+  // Use FilterEngine if available, otherwise fallback to local triangular smooth
   function smoothArr(values, strength) {
+    if (window.FilterEngine && window.FilterEngine.smooth) {
+      return window.FilterEngine.smooth(values, strength);
+    }
+    // Fallback: triangular smooth
     if (strength <= 0 || values.length < 3) return values.slice();
     const radius = strength;
     const out = [];
@@ -79,21 +84,29 @@ window.RotationEngine = (() => {
     const tFull = points.map(p => Number.isFinite(p.t) ? p.t : 0);
     const tv = valid.map(i => tFull[i]);
     const thetaV = valid.map(i => theta[i]);
-    const thSm = smoothArr(thetaV, smooth);
-    const omegaV = deriv(tv, thSm);
-
     const rArr = rPx.map(v => v * mpp);
-    const rSm = smoothArr(valid.map(i => rArr[i]), smooth);
+    const rV = valid.map(i => rArr[i]);
+
+    // FILTER POSITIONS FIRST: apply smooth to theta and r
+    const thSm = smoothArr(thetaV, smooth);
+    const rSm = smoothArr(rV, smooth);
+
+    // Derive velocities from filtered positions
+    const omegaV = deriv(tv, thSm);
     const vrV = deriv(tv, rSm);
 
+    // Spread filtered and derived values back to full arrays
+    const thetaFiltered = new Array(n).fill(NaN);
+    const rFiltered = new Array(n).fill(NaN);
     const omegaFull = new Array(n).fill(NaN);
     const vrFull = new Array(n).fill(NaN);
     for (let j = 0; j < valid.length; j++) {
-      omegaFull[valid[j]] = omegaV[j];
-      vrFull[valid[j]] = vrV[j];
+      const idx = valid[j];
+      thetaFiltered[idx] = thSm[j];
+      rFiltered[idx] = rSm[j];
+      omegaFull[idx] = omegaV[j];
+      vrFull[idx] = vrV[j];
     }
-    const thSmoothFull = new Array(n).fill(NaN);
-    for (let j = 0; j < valid.length; j++) thSmoothFull[valid[j]] = thSm[j];
 
     const period = detectPeriod(valid, tv, thetaV, omegaV, scene);
     const omMean = (() => {
@@ -114,17 +127,24 @@ window.RotationEngine = (() => {
     for (let i = 0; i < n; i++) {
       const p = points[i];
       const good = Number.isFinite(theta[i]) && rPx[i] >= 8;
+      // Published values use FILTERED positions
+      const rPub = Number.isFinite(rFiltered[i]) ? rFiltered[i] : NaN;
+      const thetaPub = thetaFiltered[i];
       rows[i] = {
         frame: p && p.frame,
         t: tFull[i],
-        r: Number.isFinite(rArr[i]) ? rArr[i] : NaN,
-        thetaRad: theta[i],
-        thetaDeg: Number.isFinite(theta[i]) ? theta[i] * RDEG : NaN,
-        thetaBaseRad: base[i],
-        thetaSmooth: thSmoothFull[i],
+        // Published (filtered) values
+        r: rPub,
+        thetaRad: thetaPub,
+        thetaDeg: Number.isFinite(thetaPub) ? thetaPub * RDEG : NaN,
         omega: omegaFull[i],
         vr: vrFull[i],
-        vt: Number.isFinite(rArr[i]) && Number.isFinite(omegaFull[i]) ? rArr[i] * omegaFull[i] : NaN,
+        vt: Number.isFinite(rPub) && Number.isFinite(omegaFull[i]) ? rPub * omegaFull[i] : NaN,
+        // Raw (unfiltered) values for audit
+        r_raw: Number.isFinite(rArr[i]) ? rArr[i] : NaN,
+        thetaRad_raw: theta[i],
+        thetaDeg_raw: Number.isFinite(theta[i]) ? theta[i] * RDEG : NaN,
+        thetaBaseRad: base[i],
         thetaConfidence: good ? 1 : 0
       };
     }
