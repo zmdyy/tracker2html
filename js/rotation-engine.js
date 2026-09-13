@@ -116,13 +116,24 @@ window.RotationEngine = (() => {
     const rArr = rPx.map(v => v * mpp);
     const rV = valid.map(i => rArr[i]);
 
-    // FILTER POSITIONS FIRST: apply smooth to theta and r
-    const thSm = smoothArr(thetaV, smooth);
-    const rSm = smoothArr(rV, smooth);
-
-    // Derive velocities from filtered positions
-    const omegaV = deriv(tv, thSm);
-    const vrV = deriv(tv, rSm);
+    // Use SG filter to get smoothed angles/radii AND derivatives from same polynomial fit
+    let thSm, rSm, omegaV, vrV;
+    
+    if (smooth > 0 && window.FilterEngine && window.FilterEngine.sgFilterWithDerivatives) {
+      // SG method: extract position and velocity from same fit
+      const thResult = window.FilterEngine.sgFilterWithDerivatives(tv, thetaV, smooth);
+      const rResult = window.FilterEngine.sgFilterWithDerivatives(tv, rV, smooth);
+      thSm = thResult.x;
+      omegaV = thResult.v;
+      rSm = rResult.x;
+      vrV = rResult.v;
+    } else {
+      // Fallback: smooth then finite differences (current production baseline)
+      thSm = smoothArr(thetaV, smooth);
+      rSm = smoothArr(rV, smooth);
+      omegaV = deriv(tv, thSm);
+      vrV = deriv(tv, rSm);
+    }
 
     // Spread filtered and derived values back to full arrays
     const thetaFiltered = new Array(n).fill(NaN);
