@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI物理视频分析器 V1</title>
+  <meta name="description" content="面向中学物理实验的视频运动分析工具：视频识别、轨迹跟踪、位移速度加速度、能量分析。" />
+  <link rel="stylesheet" href="css/app.css?v=1.9.1" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">物</div>
+      <div>
+        <h1>AI 物理视频分析器</h1>
+        <div class="brand-sub">V1.10 · AI视觉运动学、旋转测量、数据处理与实验图表分析</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <label class="upload-btn">
+        <input id="videoInput" type="file" accept="video/*" />
+        <span>＋ 上传视频</span>
+      </label>
+      <button id="resetBtn" class="btn ghost">重置</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="workspace">
+      <div class="video-panel panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">视频与轨迹</div>
+            <div id="videoStatus" class="muted">请上传实验视频</div>
+          </div>
+          <div class="mini-stats">
+            <span>帧率 <b id="fpsBadge">—</b></span>
+            <span>帧数 <b id="framesBadge">—</b></span>
+            <span>时长 <b id="durationBadge">—</b></span>
+          </div>
+          <label class="check video-overlay-toggle" title="把①的等时间间隔打点投影到视频画面上：橙色圆点=相同时刻小车所在位置，虚线标注每段位移"><input id="videoStrobeToggle" type="checkbox" checked /> 视频叠加等时间打点</label>
+        </div>
+
+        <div id="stage" class="stage empty">
+          <video id="video" playsinline preload="metadata"></video>
+          <div id="videoHitArea" class="video-hit-area" aria-label="视频交互区域"></div>
+          <canvas id="overlay"></canvas>
+          <div id="emptyHint" class="empty-hint">
+            <div class="empty-icon">▶</div>
+            <div class="empty-title">上传一个实验视频开始分析</div>
+            <div class="empty-sub">推荐：小球、平面/斜面小车、自由落体、平抛等视频</div>
+          </div>
+          <div id="stageHud" class="stage-hud hidden">
+            <span id="trackingState">未跟踪</span>
+            <span id="pointState">点：—</span>
+          </div>
+          <div id="stageAction" class="stage-action hidden">请按右侧提示操作</div>
+        </div>
+
+        <div class="transport">
+          <button id="playBtn" class="transport-btn" title="播放/暂停">▶</button>
+          <button id="stepBackBtn" class="transport-btn secondary">◀|</button>
+          <button id="stepForwardBtn" class="transport-btn secondary">|▶</button>
+          <div class="time-readout"><b id="timeCurrent">0.000</b> s</div>
+          <input id="seek" class="seek" type="range" min="0" max="0" value="0" step="0.001" />
+          <div class="time-readout"><span id="timeEnd">0.000</span> s</div>
+        </div>
+      </div>
+
+      <div class="bottom-panel panel">
+        <div class="tabs">
+          <button class="tab active" data-tab="data">数据</button>
+          <button class="tab" data-tab="charts">图表</button>
+          <button class="tab" data-tab="analysis">自动分析</button>
+          <button class="tab" data-tab="export">导出</button>
+        </div>
+
+        <div id="tab-data" class="tab-content active">
+          <div class="data-overview">
+            <div class="overview-intro">
+              <div class="section-kicker">实验数据总览</div>
+              <div class="overview-title">把视频轨迹变成可读的物理数据</div>
+              <div class="overview-sub">程序按“视频帧 → 坐标 → 位移 → 速度 → 加速度 → 能量”的顺序处理数据。当前参数改变后，会自动重新计算。</div>
+            </div>
+            <div class="overview-badges">
+              <span id="dataQualityBadge" class="quality-badge neutral">等待数据</span>
+              <span id="sampleInfoBadge" class="quality-badge neutral">采样：—</span>
+              <span id="smoothInfoBadge" class="quality-badge neutral">平滑：—</span>
+            </div>
+          </div>
+
+          <div class="metric-grid">
+            <div class="metric-card emphasis"><span>总位移</span><strong id="metricX">—</strong><em>m</em><small>按 x 方向</small></div>
+            <div class="metric-card"><span>竖直位移</span><strong id="metricY">—</strong><em>m</em><small>按 y 方向</small></div>
+            <div class="metric-card"><span>最大速度</span><strong id="metricV">—</strong><em>m/s</em><small>全程最大值</small></div>
+            <div class="metric-card"><span>最大加速度</span><strong id="metricA">—</strong><em>m/s²</em><small>绝对值最大</small></div>
+            <div class="metric-card"><span>最大动能</span><strong id="metricK">—</strong><em>J</em><small>质量参数参与计算</small></div>
+            <div class="metric-card"><span>机械能变化</span><strong id="metricU">—</strong><em>J</em><small>末值 − 初值</small></div>
+          </div>
+
+          <div class="data-flow">
+            <div class="flow-node"><b>① 视频帧</b><span id="flowRaw">—</span></div><div class="flow-arrow">→</div>
+            <div class="flow-node"><b>② 采样</b><span id="flowSample">—</span></div><div class="flow-arrow">→</div>
+            <div class="flow-node"><b>③ 平滑</b><span id="flowSmooth">—</span></div><div class="flow-arrow">→</div>
+            <div class="flow-node"><b>④ 微分</b><span>v、a</span></div><div class="flow-arrow">→</div>
+            <div class="flow-node"><b>⑤ 能量</b><span>Ek、Ep、Em</span></div>
+          </div>
+
+          <div class="processing-explain panel-lite">
+            <div class="processing-title">数据处理方法</div>
+            <div class="processing-items">
+              <span><b>时间</b>按视频帧号 / 帧率计算</span>
+              <span><b>速度</b>由位置对时间求导</span>
+              <span><b>加速度</b>由速度对时间求导</span>
+              <span><b>平滑</b>只用于计算，不修改原始视频</span>
+              <span><b>能量</b>由质量、速度和高度计算</span>
+            </div>
+          </div>
+
+          <div class="data-controls panel-lite">
+            <div>
+              <div class="control-title">数据显示</div>
+              <div class="control-sub" id="tableRangeLabel">显示全部采样点</div>
+            </div>
+            <div class="control-actions">
+              <label>每页 <select id="tablePageSize"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+              <button id="prevPageBtn" class="btn small">上一页</button>
+              <span id="pageInfo" class="page-info">第 0 / 0 页</span>
+              <button id="nextPageBtn" class="btn small">下一页</button>
+            </div>
+          </div>
+
+          <div class="table-wrap data-table-wrap">
+            <table>
+              <thead>
+                <tr><th>样本</th><th>帧号</th><th>时间 / s</th><th>x / m</th><th>y / m</th><th>s / m</th><th>速度 / m/s</th><th>加速度 / m/s²</th><th>动能 / J</th><th>机械能 / J</th><th id="thTheta">θ / °</th><th id="thOmega">ω / rad/s</th><th>r / m</th><th>vₜ / m/s</th><th>vᵣ / m/s</th></tr>
+              </thead>
+              <tbody id="dataTableBody">
+                <tr><td colspan="15" class="table-empty">尚未建立轨迹数据</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-tip">点击任意数据行，可让视频跳到对应帧。这样可以“数据 ↔ 视频”双向核对识别结果。</div>
+        </div>
+
+        <div id="tab-charts" class="tab-content">
+          <div class="chart-dashboard">
+            <div class="chart-dashboard-head">
+              <div>
+                <div class="section-kicker">图表分析</div>
+                <div class="overview-title">先看总览，再放大细节</div>
+                <div class="overview-sub">① 用等时间间隔的频闪点看每段位移，快速判断运动类型；② 关系曲线的横纵轴范围可手动设定或拖动框选放大；下方八张迷你图并排展示各物理量随时间的变化趋势。</div>
+              </div>
+              <div class="chart-presets">
+                <button class="preset-btn active" data-x="t" data-y="x">位移－时间</button>
+                <button class="preset-btn" data-x="t" data-y="v">速度－时间</button>
+                <button class="preset-btn" data-x="t" data-y="a">加速度－时间</button>
+                <button class="preset-btn" data-x="t" data-y="Em">机械能－时间</button>
+              </div>
+            </div>
+
+            <div class="chart-top-row">
+              <div class="trajectory-plot-card">
+                <div class="trajectory-head">
+                  <div>
+                    <div class="trajectory-title">① XOY 平面轨迹与频闪分析</div>
+                    <div id="trajectoryMeta" class="muted">建立轨迹后自动显示运动路径。</div>
+                  </div>
+                  <div class="trajectory-tools">
+                    <label class="check"><input id="strobeToggle" type="checkbox" checked /> 等时间间隔标记</label>
+                    <label class="tool-field">间隔
+                      <select id="strobeInterval">
+                        <option value="auto">自动</option>
+                        <option value="0.02">0.02 s</option>
+                        <option value="0.04">0.04 s</option>
+                        <option value="0.05">0.05 s</option>
+                        <option value="0.1">0.10 s</option>
+                        <option value="0.2">0.20 s</option>
+                        <option value="0.25">0.25 s</option>
+                        <option value="0.5">0.50 s</option>
+                        <option value="1">1.00 s</option>
+                      </select>
+                    </label>
+                    <label class="tool-field">时间
+                      <input id="strobeTimeMin" class="range-input" type="number" step="any" placeholder="自动" title="分析起始时间（s），留空为自动" />
+                      <span class="range-sep">~</span>
+                      <input id="strobeTimeMax" class="range-input" type="number" step="any" placeholder="自动" title="分析结束时间（s），留空为自动" />
+                    </label>
+                    <button id="strobeTimeAutoBtn" class="btn small ghost" title="清除时间范围，恢复全时段分析">时间自动</button>
+                    <button id="refreshTrajectoryBtn" class="btn small">刷新轨迹</button>
+                  </div>
+                </div>
+                <canvas id="trajectoryCanvas" height="400"></canvas>
+
+                <div class="strobe-panel">
+                  <div class="strobe-head">
+                    <span class="strobe-title">频闪纸带 · 相同时间间隔的位移</span>
+                    <span id="strobeBadge" class="quality-badge neutral">等待数据</span>
+                  </div>
+                  <canvas id="strobeCanvas"></canvas>
+                  <div id="strobeSummary" class="strobe-summary">建立轨迹后，这里会按等时间间隔给出每段位移并初判运动类型。</div>
+                  <div class="strobe-tip">判读：点距相同 → 匀速；点距均匀变大（每段多出等量位移）→ 匀加速；点距变大但增量不匀 → 加速度在变；点距变小 → 减速。</div>
+                </div>
+              </div>
+
+              <div class="curve-card">
+                <div class="curve-head">
+                  <div>
+                    <div class="trajectory-title">② 物理量关系曲线</div>
+                    <div id="chartInterpretation" class="muted">位移－时间曲线：看位置随时间如何变化。</div>
+                  </div>
+                  <div class="chart-select-group compact">
+                    <label>横轴 <select id="chartX"><option value="t">时间 t</option><option value="x">位置 x</option><option value="s">沿轨位移 s</option></select></label>
+                    <label>纵轴 <select id="chartY"><option value="x">位置 x</option><option value="y">位置 y</option><option value="s">沿轨位移 s</option><option value="v">速度 v</option><option value="a">加速度 a</option><option value="Ek">动能 Ek</option><option value="Ep">势能 Ep</option><option value="Em">机械能 Em</option><option value="theta">摆角/极角 θ</option><option value="omega">角速度 ω</option><option value="r">半径 r</option><option value="vt">切向速度 vₜ</option><option value="vr">径向速度 vᵣ</option></select></label>
+                    <button id="refreshChartBtn" class="btn small">应用</button>
+                  </div>
+                </div>
+                <div class="axis-range-box">
+                  <div class="axis-range-line">
+                    <span id="chartXRangeLabel" class="range-tag">横轴 时间</span>
+                    <input id="chartXMin" class="range-input" type="number" step="any" placeholder="自动" title="横轴最小值，留空为自动" />
+                    <span class="range-sep">~</span>
+                    <input id="chartXMax" class="range-input" type="number" step="any" placeholder="自动" title="横轴最大值，留空为自动" />
+                  </div>
+                  <div class="axis-range-line">
+                    <span id="chartYRangeLabel" class="range-tag">纵轴 位置x</span>
+                    <input id="chartYMin" class="range-input" type="number" step="any" placeholder="自动" title="纵轴最小值，留空为自动" />
+                    <span class="range-sep">~</span>
+                    <input id="chartYMax" class="range-input" type="number" step="any" placeholder="自动" title="纵轴最大值，留空为自动" />
+                    <button id="chartAutoRangeBtn" class="btn small ghost">自动范围</button>
+                    <span class="range-hint">留空即自动；图上可框选放大；时间轴与①同步</span>
+                  </div>
+                </div>
+                <div class="chart-legend" id="chartLegend"><span class="legend-dot"></span><span id="chartLegendText">当前：x(t)</span><span class="legend-help">悬停查看对应帧与数值 · 在图上拖动可框选放大</span></div>
+                <div class="chart-canvas-wrap"><canvas id="chartCanvas" height="460"></canvas><div id="chartTooltip" class="chart-tooltip hidden"></div></div>
+              </div>
+            </div>
+
+            <div class="mini-charts-section">
+              <div class="mini-charts-head">
+                <div>
+                  <div class="trajectory-title">③ 各物理量随时间变化总览</div>
+                  <div class="muted">八张小图共用同一时间轴，趋势一眼可比。悬停查看数值，点击任一小图在主图中放大。</div>
+                </div>
+                <span class="quality-badge neutral">趋势总览 · 点击放大</span>
+              </div>
+              <div id="miniChartGrid" class="mini-chart-grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-analysis" class="tab-content">
+          <div class="analysis-grid">
+            <div class="analysis-card">
+              <div class="analysis-label">识别结果</div>
+              <div id="analysisObject" class="analysis-value">—</div>
+              <div id="analysisObjectDetail" class="muted">先运行“识别目标”</div>
+            </div>
+            <div class="analysis-card">
+              <div class="analysis-label">运动性质</div>
+              <div id="analysisMotion" class="analysis-value">—</div>
+              <div id="analysisMotionDetail" class="muted">数据积累后自动判断</div>
+            </div>
+            <div class="analysis-card wide">
+              <div class="analysis-label">自动分析摘要</div>
+              <div id="analysisSummary" class="summary-box">上传视频、校准尺度并建立轨迹后，这里会给出面向物理实验的简要分析。</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-export" class="tab-content">
+          <div class="export-grid">
+            <button id="csvBtn" class="export-card"><b>CSV 数据</b><span>导出逐帧物理量</span></button>
+            <button id="jsonBtn" class="export-card"><b>JSON 项目</b><span>保存分析参数与轨迹</span></button>
+            <button id="reportBtn" class="export-card"><b>实验报告摘要</b><span>导出可复制文字</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="panel control-panel">
+        <div class="panel-title-row"><div class="panel-title">① 目标物体</div><span id="modelState" class="status-pill neutral">AI未加载</span></div>
+        <p class="help">通用 AI 适合识别常见物体，但对实验室小车这类非标准类别不一定准确。推荐先在视频中点击目标中心，程序会学习该目标的颜色（蓝、红、绿、白、黑等均可），再按颜色与连通区域在本地识别，不依赖 AI 模型。</p>
+        <div class="btn-row">
+          <button id="loadAiBtn" class="btn primary">加载 AI</button>
+          <button id="detectBtn" class="btn" disabled>AI识别目标</button>
+        </div>
+        <div class="btn-row">
+          <button id="visionDetectBtn" class="btn full" disabled>视觉识别目标（需先点选，无需 AI）</button>
+        </div>
+        <div class="btn-row">
+          <button id="rotationDetectBtn" class="btn full" disabled>旋转测量（单摆 / 圆周运动）</button>
+        </div>
+        <div class="input-row"><label>旋转场景 <select id="rotationScene"><option value="pendulum">单摆（摆角）</option><option value="circle">圆周运动（极角）</option></select></label></div>
+        <div class="input-row"><label>角度单位 <select id="angleUnit"><option value="deg">度</option><option value="rad">弧度</option></select></label></div>
+        <div id="rotationStatus" class="action-status">旋转测量：先点击固定点（悬挂点/圆心），再点击运动物体。（实际尺寸结果需先完成 ② 标尺校准）</div>
+        <label class="check"><input id="rotationMarkerToggle" type="checkbox" /> 视频叠加旋转参考线（固定点 + 半径连线）</label>
+        <div id="detections" class="detection-list empty-detection">尚未识别</div>
+        <div id="selectionStatus" class="action-status">当前未选择目标。请先在视频中点击物体中心，程序会自动学习颜色并吸附到目标；也可使用“视觉识别目标”。</div>
+      </section>
+
+      <section class="panel control-panel">
+        <div class="panel-title">② 尺度与坐标</div>
+        <div class="calibration-step">
+          <div class="step-title">标尺校准</div>
+          <div class="step-help">在视频上依次点击标尺两端，然后输入实际长度。</div>
+          <div class="input-row"><label>实际长度 <input id="scaleValue" type="number" min="0.0001" step="0.001" value="1" /></label><select id="scaleUnit"><option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option></select></div>
+          <button id="scaleBtn" class="btn full">开始点选标尺两端</button>
+          <div id="scaleStatus" class="calibration-status">尚未校准</div>
+        </div>
+        <div class="divider"></div>
+        <div class="coordinate-step">
+          <div class="step-title">坐标系</div>
+          <label class="check"><input id="invertY" type="checkbox" checked /> 视频向下为负 y（物理坐标）</label>
+          <label class="check"><input id="zeroAtStart" type="checkbox" checked /> 位移从起始位置计</label>
+          <div class="input-row"><label>斜面角 <input id="inclineAngle" type="number" min="-89" max="89" step="0.1" value="0" /></label><span class="unit">°</span></div>
+          <button id="inclineBtn" class="btn full">在视频上测量斜面角</button>
+          <div id="coordinateStatus" class="calibration-status small">默认水平 x-y 坐标；点击“测量斜面角”后，在视频中拉一条斜面线即可。</div>
+        </div>
+      </section>
+
+      <section class="panel control-panel">
+        <div class="panel-title">③ 跟踪与数据处理</div>
+        <div class="tracking-row"><span>跟踪方式</span><select id="trackingMode"><option value="visual">AI视觉外观跟踪（推荐小车）</option><option value="pendulum">单摆小球跟踪（推荐单摆/圆周）</option><option value="template">模板跟踪</option><option value="manual">手动逐帧</option></select></div>
+        <div class="tracking-row"><span>采样间隔</span><select id="sampleInterval"><option value="1">逐帧</option><option value="2">每2帧</option><option value="3">每3帧</option></select></div>
+        <div class="tracking-note" id="trackingModeNote">分析采用逐帧定位，不按视频播放速度追踪，避免电脑处理速度不足造成“跟不上”和漏帧。</div>
+        <div class="smooth-row"><label>平滑程度 <input id="smoothRange" type="range" min="0" max="4" step="1" value="2" /></label><b id="smoothLabel">中等</b></div>
+        <div class="btn-row"><button id="trackBtn" class="btn primary full" disabled>建立轨迹</button></div>
+        <div id="trackReadyStatus" class="calibration-status small">准备条件：请先选择目标并完成标尺校准。逐帧采样按视频实际帧计算，不按浏览器屏幕刷新次数计算。</div>
+        <div id="trackingProgress" class="progress-wrap hidden"><div class="progress-bar"><span id="progressBar"></span></div><div id="progressText" class="muted">准备中…</div></div>
+      </section>
+
+      <section class="panel control-panel">
+        <div class="panel-title">④ 能量参数</div>
+        <div class="energy-grid">
+          <label>质量 m <input id="mass" type="number" min="0" step="0.001" value="0.1" /></label>
+          <label>重力 g <input id="gravity" type="number" min="0" step="0.01" value="9.80" /></label>
+          <label>势能零点 h₀ <input id="zeroHeight" type="number" step="0.001" value="0" /></label>
+        </div>
+        <p class="help">能量默认计算平动动能、重力势能和机械能。旋转测量请在①面板开启“旋转测量”模式。</p>
+      </section>
+    </aside>
+  </main>
+
+  <canvas id="frameCanvas" class="hidden"></canvas>
+  <div id="toast" class="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="js/mp4-parser.js"></script>
+  <script src="js/physics-engine.js"></script>
+  <script src="js/rotation-engine.js"></script>
+  <script src="js/tracking-engine.js"></script>
+  <script src="js/chart-engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
