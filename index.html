@@ -280,6 +280,18 @@
 
     <aside class="sidebar">
       <section class="panel control-panel">
+        <div class="panel-title">旋转测量</div>
+        <p class="help">只用于单摆 / 圆周运动。斜面小车、自由落体等平动实验请勿开启。</p>
+        <div class="btn-row">
+          <button id="rotationDetectBtn" class="btn full" disabled>旋转测量（单摆 / 圆周运动）</button>
+        </div>
+        <div class="input-row"><label>旋转场景 <select id="rotationScene"><option value="pendulum">单摆（摆角）</option><option value="circle">圆周运动（极角）</option></select></label></div>
+        <div class="input-row"><label>角度单位 <select id="angleUnit"><option value="deg">度</option><option value="rad">弧度</option></select></label></div>
+        <div id="rotationStatus" class="action-status">未开启。平动实验请保持关闭；单摆/圆周请先点此开启，再点悬挂点或圆心。</div>
+        <label class="check"><input id="rotationMarkerToggle" type="checkbox" /> 视频叠加旋转参考线（固定点 + 半径连线）</label>
+      </section>
+
+      <section class="panel control-panel">
         <div class="panel-title-row"><div class="panel-title">① 目标物体</div><span id="modelState" class="status-pill neutral">AI未加载</span></div>
         <p class="help">通用 AI 适合识别常见物体，但对实验室小车这类非标准类别不一定准确。推荐先在视频中点击目标中心，程序会学习该目标的颜色（蓝、红、绿、白、黑等均可），再按颜色与连通区域在本地识别，不依赖 AI 模型。</p>
         <div class="btn-row">
@@ -289,13 +301,6 @@
         <div class="btn-row">
           <button id="visionDetectBtn" class="btn full" disabled>视觉识别目标（需先点选，无需 AI）</button>
         </div>
-        <div class="btn-row">
-          <button id="rotationDetectBtn" class="btn full" disabled>旋转测量（单摆 / 圆周运动）</button>
-        </div>
-        <div class="input-row"><label>旋转场景 <select id="rotationScene"><option value="pendulum">单摆（摆角）</option><option value="circle">圆周运动（极角）</option></select></label></div>
-        <div class="input-row"><label>角度单位 <select id="angleUnit"><option value="deg">度</option><option value="rad">弧度</option></select></label></div>
-        <div id="rotationStatus" class="action-status">旋转测量：先点击固定点（悬挂点/圆心），再点击运动物体。（实际尺寸结果需先完成 ② 标尺校准）</div>
-        <label class="check"><input id="rotationMarkerToggle" type="checkbox" /> 视频叠加旋转参考线（固定点 + 半径连线）</label>
         <div id="detections" class="detection-list empty-detection">尚未识别</div>
         <div id="selectionStatus" class="action-status">当前未选择目标。请先在视频中点击物体中心，程序会自动学习颜色并吸附到目标；也可使用“视觉识别目标”。</div>
       </section>
@@ -338,7 +343,7 @@
           <label>重力 g <input id="gravity" type="number" min="0" step="0.01" value="9.80" /></label>
           <label>势能零点 h₀ <input id="zeroHeight" type="number" step="0.001" value="0" /></label>
         </div>
-        <p class="help">能量默认计算平动动能、重力势能和机械能。旋转测量请在①面板开启“旋转测量”模式。</p>
+        <p class="help">能量默认按平动计算。单摆 / 圆周请先在上方开启旋转测量；平动实验请勿开启。</p>
       </section>
     </aside>
   </main>
