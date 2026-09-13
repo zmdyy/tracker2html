@@ -8,15 +8,25 @@ window.RotationEngine = (() => {
     }
     // Fallback: triangular smooth
     if (strength <= 0 || values.length < 3) return values.slice();
-    const radius = strength;
+    const radius = Math.min(strength, 2);
     const out = [];
+    const sgCoeffs = {
+      1: [-3, 12, 17, 12, -3],
+      2: [-21, 14, 39, 54, 59, 54, 39, 14, -21]
+    };
+    const coeffs = sgCoeffs[radius] || sgCoeffs[2];
+    const halfWin = Math.floor(coeffs.length / 2);
+    const norm = coeffs.reduce((a, b) => a + b, 0);
     for (let i = 0; i < values.length; i++) {
-      let sum = 0, wsum = 0;
-      for (let j = Math.max(0, i - radius); j <= Math.min(values.length - 1, i + radius); j++) {
-        const w = radius + 1 - Math.abs(i - j);
-        sum += values[j] * w; wsum += w;
+      if (i < halfWin || i >= values.length - halfWin) {
+        out.push(values[i]);
+      } else {
+        let sum = 0;
+        for (let j = 0; j < coeffs.length; j++) {
+          sum += values[i - halfWin + j] * coeffs[j];
+        }
+        out.push(sum / norm);
       }
-      out.push(sum / wsum);
     }
     return out;
   }
@@ -31,6 +41,25 @@ window.RotationEngine = (() => {
       v[q.length - 1] = (q[q.length - 1] - q[q.length - 2]) / Math.max(1e-9, t[q.length - 1] - t[q.length - 2]);
     }
     return v;
+  }
+
+  function detectExtrema(theta, omega) {
+    const extrema = [];
+    for (let i = 1; i < theta.length - 1; i++) {
+      if (!Number.isFinite(theta[i]) || !Number.isFinite(omega[i])) continue;
+      const isMax = theta[i] > theta[i - 1] && theta[i] > theta[i + 1];
+      const isMin = theta[i] < theta[i - 1] && theta[i] < theta[i + 1];
+      const omegaCross = i > 0 && i < omega.length - 1 && Number.isFinite(omega[i - 1]) && Number.isFinite(omega[i + 1]) && Math.sign(omega[i - 1]) !== Math.sign(omega[i + 1]);
+      if (isMax || isMin || omegaCross) {
+        extrema.push({ idx: i, type: isMax ? 'max' : isMin ? 'min' : 'turn' });
+      }
+    }
+    return extrema;
+  }
+
+  function reconstructPeaks(t, theta, extrema) {
+    const reconstructed = theta.slice();
+    return reconstructed;
   }
 
   function compute(points, pivot, cfg = {}) {
